@@ -1,0 +1,267 @@
+---
+title: "Hw5_119020436_WuJiaqi"
+author: "WuJiaqi 119020436"
+date: "12/5/2021"
+output: html_document
+---
+
+```{r}
+# Q1
+# (a)
+setwd("/Users/wujiaqi/Desktop/FIN3380/Data")
+library(RPostgres)
+library(tidyr)
+library(dplyr)
+library(zoo)
+
+wrds = dbConnect(Postgres(),
+                 host='wrds-pgdata.wharton.upenn.edu',
+                 port=9737,
+                 user='jiaqiwu555',
+                 password='Wjq15068193025',
+                 dbname='wrds',
+                 sslmode='require')
+q="select distinct permno,ticker from CRSP.DSENAMES where ticker = 'NFLX'"
+res=dbSendQuery(wrds,q)
+ticker=dbFetch(res,n=-1)
+dbClearResult(res)
+
+q=paste0("select date,ret as nflx, prc as nflx_prc from CRSP.DSF where permno = '",
+         ticker$permno,
+         "' and date>='2012-01-24' and date<='2013-07-23'")
+res=dbSendQuery(wrds,q)
+nflx=dbFetch(res,n=-1)
+dbClearResult(res)
+
+head(nflx)
+```
+
+
+```{r}
+setwd("/Users/wujiaqi/Desktop/FIN3380/Data")
+ff=read.csv("ff_daily.csv",skip=4)
+head(ff)
+colnames(ff)=c("date","mkt.rf","smb","hml","rf")
+ff$date = as.Date(ff$date,"%Y%m%d")
+head(ff)
+ff = ff %>% 
+  mutate_at(vars(mkt.rf,smb,hml,rf),function(x) x/100) %>%
+  filter((date>="2012-01-24")&(date<="2013-07-23")) %>%
+  mutate(mkt=mkt.rf+rf)
+head(ff)
+```
+
+```{r}
+nflx.mkt = nflx %>% left_join(ff,by="date")
+nflx.mkt = nflx.mkt %>% mutate(nflx.rf=nflx-rf)
+head(nflx.mkt)
+```
+
+```{r}
+nflx.est = nflx.mkt %>% filter(date>="2012-01-24" & date<"2013-01-24")
+nflx.event = nflx.mkt %>% filter(date>="2013-01-24")
+a.model = lm(nflx-mkt~1, data=nflx.est)
+summary(a.model)
+a.pret = a.model$coefficient
+a.ab = nflx.event$nflx - a.pret
+t.test(a.ab,)
+cat("The p-value of simple model is 0.1047, which is not significant at 5% so we cannot reject H0. Thus, it is not abnormal in simple excess return model.")
+```
+
+
+```{r}
+#(b)
+b.model = lm(nflx.rf~mkt.rf,data=nflx.est)
+summary(b.model)
+b.pret = b.model$coefficients[1]+b.model$coefficients[2]*nflx.event$mkt.rf
+b.ab = nflx.event$nflx - b.pret
+t.test(b.ab,)
+cat("The p-value of CAPM is 0.1637, which is not significant at 5% so we cannot reject H0. Thus, it is not abnormal in CAPM.")
+```
+
+```{r}
+#(c)
+c.model = lm(nflx.rf~mkt.rf+smb+hml, data=nflx.est)
+summary(c.model)
+c.pret = c.model$coefficients[1]+c.model$coefficients[2]*nflx.event$mkt.rf+c.model$coefficients[3]*nflx.event$smb+c.model$coefficients[4]*nflx.event$hml
+t.test(nflx.event$nflx,c.pret)
+c.ab = nflx.event$nflx - c.pret
+t.test(c.ab,)
+cat("The p-value of FF model is 0.1625, which is not significant at 5% so we cannot reject H0. Thus, it is not abnormal in FF model.")
+```
+
+```{r}
+# (d)
+after.ret = sum(nflx.event$nflx[1:30])
+after.ret = rep(after.ret,nrow(nflx.est))
+nflx.est$before.ret = rollsum(nflx.est$nflx,k = 30,fill = NA,align = "right")
+t.test(nflx.est$before.ret,after.ret)
+```
+
+```{r}
+# Q2
+# (a)
+library(tibble)
+library(tibbletime)
+library(broom)
+library(purrr)
+setwd("/Users/wujiaqi/Desktop/FIN3380/Data")
+port = read.csv("Portfolios_Formed_on_ME.CSV",skip=12)
+port = port[1:1142,]
+head(port)
+tail(port)
+port = port %>% 
+  select(X,Lo.10,Hi.10) %>%
+  filter(X>="199601"&X<="201512") %>%
+  mutate_at(vars(Lo.10,Hi.10),~ as.numeric(.)/100) %>%
+  arrange(X)
+port$X = as.yearmon(port$X,"%Y%m")
+colnames(port)=c("date","L10","H10")
+port = gather(port,key="level",value="ret",-date)
+head(port)
+tail(port)
+```
+```{r}
+setwd("/Users/wujiaqi/Desktop/FIN3380/Data")
+ff=read.csv("ff_monthly.csv",skip=3)
+colnames(ff)=c("date","mkt.rf","smb","hml","rf")
+head(ff)
+ff = ff %>% 
+  select(date,mkt.rf,rf) %>%
+  mutate_at(vars(mkt.rf,rf),~as.numeric(.)/100) %>%
+  filter(date>="199601"&date<="201512") %>%
+  mutate(date = as.yearmon(date,"%Y%m"))
+head(ff)
+port.ff = port %>% left_join(ff,by="date",all.x=F,all.y=F)
+port.ff = port.ff %>% mutate(ret.rf=ret-rf)
+head(port.ff)
+```
+
+```{r}
+port.ff = as.tibble(port.ff)
+Roll.lm = rollify(.f = function(ret.rf, mkt.rf) {
+  lm(ret.rf ~ mkt.rf)}, window = 36, unlist = FALSE)
+port.roll = port.ff %>%
+  group_by(level) %>%
+  arrange(date) %>%
+  mutate(model=Roll.lm(ret.rf,mkt.rf)) %>%
+  select(date,model,level) %>%
+  slice(-1:-35)
+port.roll$model[1:3]
+```
+
+```{r}
+port.roll = port.roll %>% 
+  mutate(model=map(model,tidy)) %>%
+  unnest(model) %>%
+  ungroup() %>%
+  arrange(term)
+head(port.roll)
+```
+
+```{r}
+a.x = port.roll %>% filter(level=="H10",term=="(Intercept)")
+a.y = port.roll %>% filter(level=="L10",term=="(Intercept)")
+a.test = t.test(a.x$estimate,a.y$estimate,"less")
+a.test$p.value
+cat("The p-value of t-test for alpha is",a.test$p.value,"so it is 5% significant and we should reject H0. Thus, L10 alpha is less than H10 alpha.")
+```
+```{r}
+b.x = port.roll %>% filter(level=="H10",term=="mkt.rf")
+b.y = port.roll %>% filter(level=="L10",term=="mkt.rf")
+b.test = t.test(b.x$estimate,b.y$estimate,"less")
+b.test$p.value
+cat("The p-value of t-test for beta is",b.test$p.value,"so it is 5% significant and we should reject H0. Thus, L10 beta is less than H10 beta.")
+cat("It is consistent with the expectation. According to CAPM, stocks tend to have higher beta and alpha if it performs well.")
+```
+
+```{r}
+# (b)
+setwd("/Users/wujiaqi/Desktop/FIN3380/Data")
+usrec = read.csv("USREC.csv")
+tail(usrec)
+usrec = usrec %>%
+  filter(DATE>="1996-01-01"&DATE<="2015-12-01") %>%
+  mutate(date=paste0(substr(DATE,1,4),substr(DATE,6,7))) %>%
+  mutate(ym=as.yearmon(date,"%Y%m")) %>%
+  select(ym,USREC)
+head(usrec)
+tail(usrec)
+```
+
+```{r}
+setwd("/Users/wujiaqi/Desktop/FIN3380/Data")
+daily = read.csv("Portfolios_Formed_on_ME_daily.csv",skip=12)
+daily = daily[1:25105,]
+daily = daily %>% select(X,Lo.10,Hi.10) 
+colnames(daily)=c("date","L10","H10")
+daily = daily %>%
+  filter(date>="19960101" & date<="20151231") %>%
+  mutate(date=as.Date(date,"%Y%m%d")) %>%
+  mutate(ym=as.yearmon(date,"%Y%m")) %>%
+  mutate_at(vars(L10,H10),~ as.numeric(.)/100) %>%
+  gather("level","ret",-date,-ym)
+head(daily)
+tail(daily)
+```
+
+```{r}
+setwd("/Users/wujiaqi/Desktop/FIN3380/Data")
+ff=read.csv("ff_daily.csv",skip=4)
+colnames(ff)=c("date","mkt.rf","smb","hml","rf")
+ff$date = as.Date(ff$date,"%Y%m%d")
+ff = ff %>% 
+  mutate_at(vars(mkt.rf,smb,hml,rf),function(x) x/100) %>%
+  select(date,mkt.rf,rf)
+head(ff)
+```
+
+```{r}
+daily = daily %>%
+  left_join(usrec,by="ym") %>%
+  left_join(ff,by="date") %>%
+  mutate(ret.rf=as.numeric(ret)-rf)
+head(daily)
+daily=as.tibble(daily)
+```
+
+```{r}
+capm = daily %>%
+  group_by(ym,level) %>%
+  summarize(model=list(lm(ret.rf~mkt.rf)),
+            ym=first(ym),
+            level=first(level),
+            usrec=first(USREC))
+capm = capm %>%
+  mutate(model=map(model,tidy)) %>%
+  unnest(model) %>%
+  ungroup()
+head(capm)
+```
+
+```{r}
+a.low0 = capm[capm$usrec==0 & capm$term=="(Intercept)" & capm$level=="L10",]
+a.low1 = capm[capm$usrec==1 & capm$term=="(Intercept)" & capm$level=="L10",]
+a.low.test = t.test(a.low0$estimate,a.low1$estimate)
+a.low.test
+
+b.low0 = capm[capm$usrec==0 & capm$term=="mkt.rf" & capm$level=="L10",]
+b.low1 = capm[capm$usrec==1 & capm$term=="mkt.rf" & capm$level=="L10",]
+b.low.test = t.test(b.low0$estimate,b.low1$estimate)
+b.low.test
+cat("For L10, the p-values of alpha and beta are both large, so we fail to reject H0. Thus, alpha and beta are indiffenret under recession and expansion.")
+```
+
+```{r}
+a.high0 = capm[capm$usrec==0 & capm$term=="(Intercept)" & capm$level=="H10",]
+a.high1 = capm[capm$usrec==1 & capm$term=="(Intercept)" & capm$level=="H10",]
+a.high.test = t.test(a.high0$estimate,a.high1$estimate)
+a.high.test
+
+b.high0 = capm[capm$usrec==0 & capm$term=="mkt.rf" & capm$level=="H10",]
+b.high1 = capm[capm$usrec==1 & capm$term=="mkt.rf" & capm$level=="H10",]
+b.high.test = t.test(b.high0$estimate,b.high1$estimate)
+b.high.test
+cat("For H10, the p-values of alpha and beta are both large, so we fail to reject H0. Thus, alpha and beta are indiffenret under recession and expansion.")
+```
+
