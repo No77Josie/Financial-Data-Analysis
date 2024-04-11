@@ -1,0 +1,276 @@
+---
+title: "FIN3380Ass1"
+author: "WuJiaqi 119020436"
+date: "10/18/2021"
+output: html_document
+---
+
+### Q1: Perform the data check on the DJ Index data. Is there some data problems?
+```{r}
+setwd("/Users/wujiaqi/Desktop")
+library(dplyr)
+dj = read.csv("dj.csv")
+head(dj)
+```
+
+```{r}
+# Method 1: Summary statistics
+summary(dj)
+```
+
+```{r}
+# We find the following problems:
+# 1. The datatype of "date" is charactor
+# 2. There is an NA in the stock price
+# 3. The minimum stock price of DJ is 0, which is unreasonable
+# Then we can address these problems one by one:
+dj$date = as.Date(dj$date)
+dj = dj[-which(is.na(dj$dji) == T),]
+dj = dj[-which(dj$dji == 0),]
+summary(dj)
+```
+
+```{r}
+# Method 2: Check the dimension
+dim(dj)
+# Since the data contains the stock prices of about 112 years, each year with about 252 trading days
+# The number of rows should be about 112 * 252 = 28224
+# Since the row dimension of the data is 28071, which is a little bit smaller than 28224 due to the removemrnt of certain data, it seems reasonable
+```
+
+```{r}
+# Method 3: Plot the DJ close price
+plot(dj$dji~dj$date,
+     type = 'l', 
+     xlab = 'date', 
+     ylab = 'close price', 
+     main = 'DJ: Close Price')
+# The plot of the close price looks smooth, so it should be right.
+```
+
+
+### Q2: In class, we build up a long-short strategy of MSFT and AAPL using their arithmetic returns.
+### (a) Amend the long-short strategy using AAPL and MSFT presented in class by replacing the Arithmetic return with Logarithmic returns. How is your total return using logarithmic returns compared to using arithmetic returns.
+```{r}
+# Caculate the logarithmic returns
+msft = read.csv("msft.csv")
+aapl = read.csv("aapl.csv")
+msft$date = as.Date(msft$date)
+aapl$date = as.Date(aapl$date)
+```
+
+```{r}
+msftret = msft %>% select(date,prc) %>%
+  arrange(date) %>%
+  mutate(lag.prc = lag(prc,1)) %>%
+  mutate(msft.ret = log(prc/lag.prc)) %>%
+  select(date,msft.ret)
+head(msftret)
+```
+
+```{r}
+aaplret = aapl %>%
+  select(date,prc) %>%
+  arrange(date) %>%
+  mutate(lag.prc = lag(prc,1)) %>%
+  mutate(aapl.ret = log(prc/lag.prc)) %>%
+  select(date,aapl.ret)
+head(aaplret)
+```
+
+```{r}
+msft.aapl = aaplret %>% inner_join(msftret,by='date')
+head(msft.aapl)
+```
+
+```{r}
+cor(msft.aapl$msft.ret,msft.aapl$aapl.ret, use='complete.obs')
+```
+
+```{r}
+msft.aapl = msft.aapl %>% mutate(msft.aapl.ret = msft.ret-aapl.ret)
+head(msft.aapl)
+```
+
+```{r}
+msft.aapl = msft.aapl %>% 
+  filter(!is.na(msft.aapl.ret)) %>%
+  arrange(date) %>%
+  mutate(cumret = cumprod(msft.aapl.ret+1))
+head(msft.aapl)
+```
+
+```{r}
+plot(msft.aapl$cumret~msft.aapl$date,
+     type = "l",
+     xlab = "date",
+     ylab = "ret",
+     main = "Long MSFT~Short AAPL (Logarithmic returns)")
+```
+
+
+```{r}
+# Calculate the arithmetic returns
+msftret_ar = msft %>% select(date,prc) %>%
+  arrange(date) %>%
+  mutate(lag.prc = lag(prc,1)) %>%
+  mutate(msft.ret = prc/lag.prc-1) %>%
+  select(date,msft.ret)
+aaplret_ar = aapl %>% select(date,prc) %>%
+  arrange(date) %>%
+  mutate(lag.prc = lag(prc,1)) %>%
+  mutate(aapl.ret = prc/lag.prc-1) %>%
+  select(date,aapl.ret)
+msft.aapl_ar = aaplret_ar %>% inner_join(msftret_ar,by='date')
+head(msft.aapl_ar)
+```
+
+```{r}
+msft.aapl_ar = msft.aapl_ar %>% 
+  mutate(msft.aapl.ret = msft.ret-aapl.ret) %>%
+  filter(!is.na(msft.aapl.ret)) %>%
+  arrange(date) %>%
+  mutate(cumret = cumprod(msft.aapl.ret+1))
+head(msft.aapl_ar)
+```
+
+```{r}
+plot(msft.aapl_ar$cumret~msft.aapl_ar$date,
+     type = "l",
+     xlab = "date",
+     ylab = "ret",
+     main = "Long MSFT~Short AAPL (Arithmetic return)")
+```
+
+```{r}
+cat('The total logarithem return is ',tail(msft.aapl,1)[,ncol(msft.aapl)])
+```
+
+```{r}
+cat('The total arithmetic return is ',tail(msft.aapl_ar,1)[,ncol(msft.aapl_ar)])
+```
+
+
+### (b) Google and find out how to plot two lines on the same chart. Plot the cumulative returns of MSFT and AAPL on the same chart.
+```{r}
+# Using the logarithem return
+msftret = msftret %>% 
+  filter(!is.na(msft.ret)) %>%
+  arrange(date) %>%
+  mutate(cumret = cumprod(msft.ret+1))
+aaplret = aaplret %>% 
+  filter(!is.na(aapl.ret)) %>%
+  arrange(date) %>%
+  mutate(cumret = cumprod(aapl.ret+1))
+head(msftret)
+head(aaplret)
+```
+
+```{r}
+plot(msftret$cumret~msftret$date,
+     type = "l",
+     xlab = "date",
+     ylab = "cumret",
+     ylim = range(msftret[,c("cumret")]),
+     main = "MSFT & AAPL:logarithem cumret")
+lines(aaplret$cumret~aaplret$date,col="red")
+legend("topleft",
+       c("MSFT logarithem cumret","AAPL logarithem cumret"),
+       lty = c(1,1),
+       col = c("black","red"))
+```
+
+```{r}
+# Using the arithmetic return:
+msftret_ar = msftret_ar %>% 
+  filter(!is.na(msft.ret)) %>%
+  arrange(date) %>%
+  mutate(cumret = cumprod(msft.ret+1))
+aaplret_ar = aaplret_ar %>% 
+  filter(!is.na(aapl.ret)) %>%
+  arrange(date) %>%
+  mutate(cumret = cumprod(aapl.ret+1))
+head(msftret_ar)
+head(aaplret_ar)
+```
+
+```{r}
+plot(msftret_ar$cumret~msftret_ar$date,
+     type = "l",
+     xlab = "date",
+     ylab = "cumret",
+     ylim = range(msftret_ar[,c("cumret")]),
+     main = "MSFT & AAPL:arithmetic cumret")
+lines(aaplret_ar$cumret~aaplret_ar$date,col="red")
+legend("topleft",
+       c("MSFT arithmetic cumret","AAPL arithmetic cumret"),
+       lty = c(1,1),
+       col = c("black","red"))
+```
+
+
+### (c) Amend the strategy presented in class. The new strategy is to long MSFT and short AAPL when returns of MSFT is higher than the returns of AAPL in the last trading day and short MSFT but long AAPL when returns of MSFT is lower than the returns of AAPL in the last trading day. How about your new strategy performance? hint: mutate a new column with 1 and -1 based on sign of the lag value of the difference in MSFT and AAPL returns using ifelse function: mysignal = ifelse(msft.appl.ret>0,1,-1)
+```{r}
+# Using logarithem return:
+msft.aapl = msft.aapl %>%
+  filter(!is.na(msft.aapl.ret)) %>%
+  arrange(date) %>%
+  mutate(lag.ret=lag(msft.aapl.ret,1)) %>%
+  mutate(Flag=ifelse(lag.ret>0,1,-1))
+head(msft.aapl)
+```
+
+```{r}
+msft.aapl = msft.aapl %>%
+  filter(!is.na(lag.ret)) %>%
+  arrange(date) %>%
+  mutate(ret_new=msft.aapl.ret*Flag) %>%
+  mutate(cumret_new = cumprod(ret_new+1))
+tail(msft.aapl)
+```
+
+```{r}
+plot(msft.aapl$cumret~msft.aapl$date,
+     type = "l",
+     xlab = "date",
+     ylab = "ret",
+     ylim = range(msft.aapl$cumret,msft.aapl$cumret_new),
+     main = "Long MSFT~Short AAPL (Logarithmic returns)")
+lines(msft.aapl$cumret_new~msft.aapl$date,col="red")
+legend("topleft",
+       c("Old cumret","New cumret"),
+       lty = c(1,1),
+       col = c("black","red"))
+```
+```{r}
+# Using logarithem return:
+msft.aapl_ar = msft.aapl_ar %>%
+  filter(!is.na(msft.aapl.ret)) %>%
+  arrange(date) %>%
+  mutate(lag.ret=lag(msft.aapl.ret,1)) %>%
+  mutate(Flag=ifelse(lag.ret>0,1,-1)) %>%
+  filter(!is.na(lag.ret)) %>%
+  mutate(ret_new=msft.aapl.ret*Flag) %>%
+  mutate(cumret_new = cumprod(ret_new+1))
+tail(msft.aapl_ar)
+```
+
+```{r}
+plot(msft.aapl_ar$cumret~msft.aapl_ar$date,
+     type = "l",
+     xlab = "date",
+     ylab = "ret",
+     ylim = range(msft.aapl_ar$cumret,msft.aapl_ar$cumret_new),
+     main = "Long MSFT~Short AAPL (Arithmetic returns)")
+lines(msft.aapl_ar$cumret_new~msft.aapl_ar$date,col="red")
+legend("topleft",
+       c("Old cumret","New cumret"),
+       lty = c(1,1),
+       col = c("black","red"))
+```
+```{r}
+# Conclusion: For both logarithem return and arithmetic return, the new strategy performs better than the one one.
+```
+
+
+
