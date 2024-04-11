@@ -1,0 +1,214 @@
+---
+title: "3380hw3"
+author: "WuJiaqi 119020436"
+date: "11/12/2021"
+output: html_document
+---
+```{r}
+# Q1
+# (a)
+library(dplyr)
+library(zoo)
+library(tidyr)
+library(RPostgres)
+setwd("/Users/wujiaqi/Desktop/FIN3380/Data")
+load("ret.all.RData")
+head(ret.all)
+```
+```{r}
+tmp = ret.all %>%
+  group_by(permno) %>%
+  summarise(n=n())
+tmp
+ret.all = spread(ret.all,"permno","ret")
+ret.all = ret.all[complete.cases(ret.all),]
+head(ret.all)
+```
+```{r}
+tic = data.frame(
+  ticker=c("AAPL","MSFT","IBM","BABA","GE","KO"),
+  permno=c("14593","10107","12490","14888","12060","11308"),
+  wgt=c(0.1,0.2,0.15,0.25,0.1,0.2)
+)
+tic = tic[order(tic$permno),]
+wgt = matrix(tic$wgt,ncol=6)
+```
+
+```{r}
+n.stock = 6
+variance = rep(0,n.stock)
+covariance = matrix(nrow = n.stock, ncol = n.stock)
+
+for (i in 1:n.stock){
+  var = var(ret.all[,i+1])*252
+  variance[i] = var
+  for (t in 1:n.stock){
+    cov = cov(ret.all[,i+1],ret.all[,t+1])*252
+    covariance[i,t] = cov
+  }
+}
+covariance
+```
+
+
+```{r}
+portvar = function(wgt,variance,covariance){
+  w1 =wgt[1]
+  w2= wgt[2]
+  w3= wgt[3]
+  w4= wgt[4]
+  w5= wgt[5]
+  w6= wgt[6]
+  var1 = variance[1]
+  var2 = variance[2]
+  var3 = variance[3]
+  var4 = variance[4]
+  var5 = variance[5]
+  var6 = variance[6]
+  cov12=covariance[1,2]
+  cov13=covariance[1,3]
+  cov14=covariance[1,4]
+  cov15=covariance[1,5]
+  cov16=covariance[1,6]
+  cov23=covariance[2,3]
+  cov24=covariance[2,4]
+  cov25=covariance[2,5]
+  cov26=covariance[2,6]
+  cov34=covariance[3,4]
+  cov35=covariance[3,5]
+  cov36=covariance[3,6]
+  cov45=covariance[4,5]
+  cov46=covariance[4,6]
+  cov56=covariance[5,6]
+  portvar = w1^2*var1 + w2^2*var2 + w3^2*var3 + w4^2*var4 + w5^2*var5 + w6^2*var6 + 2*w1*w2*cov12 + 2*w1*w3*cov13 + 2*w1*w4*cov14 + 2*w1*w5*cov15 + 2*w1*w6*cov16 + 2*w2*w3*cov23 + 2*w2*w4*cov24 + 2*w2*w5*cov25 + 2*w2*w6*cov26 + 2*w3*w4*cov34 + 2*w3*w5*cov35 + 2*w3*w6*cov36 + 2*w4*w5*cov45 + 2*w4*w6*cov46 + 2*w5*w6*cov56
+  return(portvar)
+}
+var.port = portvar(wgt,variance,covariance)
+var.port
+```
+
+
+```{r}
+# (b)
+cov.m = cov(ret.all[,2:ncol(ret.all)])
+cov.m = cov.m*252
+cat("The annual covariance matrix is ","\n")
+print(cov.m)
+wgt = matrix(tic$wgt,ncol=6)
+cat("The weight matrix is ","\n")
+print(wgt)
+```
+
+
+```{r}
+portvar = function(wgt,covariance){
+  port.var = wgt %*% cov.m %*% t(wgt)
+  return(port.var)
+}
+port.var = portvar(wgt,cov.m)
+port.var
+```
+
+```{r}
+# Q2
+# (a)
+load("crsp.sample.RData")
+unique(crsp.sample$permno)
+summary(crsp.sample)
+crsp.sample = crsp.sample %>%
+  filter(date>="2017-01-01",
+         date<="2018-12-31",
+         permno %in% c(39731,79089,83148))
+crsp = crsp.sample %>%
+  select(date,permno,ret) %>%
+  mutate(ret=ifelse(is.na(ret),0,ret)) %>%
+  spread(permno,ret) %>%
+  select(-date)
+crsp.ret = crsp.sample %>%
+  group_by(permno) %>%
+  mutate(ret=ifelse(is.na(ret),0,ret)) %>%
+  summarise(avg.ret=mean(ret),
+            std=sd(ret)) %>%
+  ungroup()
+crsp.ret
+ret.mat = as.matrix(crsp)
+cor = cor(ret.mat)
+cov = cov(ret.mat)
+cat("The correlation matrix is: ","\n")
+cor
+cat("The covariance matrix is: ","\n")
+cov
+```
+
+```{r}
+# (b)
+ret.annual = crsp.ret[,1:2]
+ret.annual = ret.annual %>% mutate(avg.ret = avg.ret *252)
+ret.annual
+
+std.annual = crsp.ret[,c(1,3)]
+std.annual = std.annual %>% mutate(std = std *sqrt(252))
+std.annual
+```
+
+```{r}
+cor.annual = cor
+cat("The annual correlation matrix is: ","\n")
+cor.annual
+cov.annual = cov*252
+cat("The annual covariance matrix is: ","\n")
+cov.annual
+```
+
+```{r}
+# (c)
+weight = data.frame(
+  wgt1 = rep(seq(0,1,0.01),times=101*101),
+  wgt2 = rep(seq(0,1,0.01),each=101*101),
+  wgt3 = rep(seq(0,1,0.01),each=101,times=101))
+ef = weight %>%
+  mutate(sum=wgt1+wgt2+wgt3) %>%
+  filter(sum==1) %>%
+  select(-sum)
+ef = ef %>%
+  mutate(sd.port = sqrt(wgt1^2*std.annual$std[1]^2+wgt2^2*std.annual$std[2]^2+wgt3^2*std.annual$std[3]^2+
+                          2*wgt1*wgt2*cov.annual[1,2]+2*wgt2*wgt3*cov.annual[2,3]+2*wgt1*wgt3*cov.annual[1,3]),
+         ret.port = wgt1*ret.annual$avg.ret[1]+wgt2*ret.annual$avg.ret[2]+wgt3*ret.annual$avg.ret[3])
+```
+
+```{r}
+sample1 = ef %>%
+  filter(wgt1==0.4,wgt2==0.2,wgt3==0.4)
+sample1
+
+sample2 = ef %>%
+  filter(wgt1==0.8,wgt2==0.1,wgt3==0.1)
+sample2
+```
+
+```{r}
+# (d)
+ef = ef %>%
+  mutate(sd.port=round(sd.port,3),
+         ret.port=round(ret.port,3)) %>%
+  group_by(ret.port) %>%
+  summarise(sd.port = min(sd.port)) %>%
+  ungroup()
+head(ef)
+```
+
+```{r}
+plot(ef$ret.port~ef$sd.port,
+     type="l", lwd=2, ylim=c(min(ef$ret.port)-0.01,max(ef$ret.port)+0.01),
+     main="Efficient Frontier", xlab="std",ylab="ret")
+gmv=ef[which(ef$sd.port==min(ef$sd.port)),c("sd.port","ret.port")]
+points(gmv,pch=19,col="red")
+```
+
+```{r}
+# (e)
+ef = ef %>% mutate(rf=0,sr=(ret.port-rf)/sd.port)
+cml = ef[which(ef$sr==max(ef$sr)),]
+print(cml)
+```
+
