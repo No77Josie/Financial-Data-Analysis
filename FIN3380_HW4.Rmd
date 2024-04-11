@@ -1,0 +1,260 @@
+---
+title: "Hw4_WuJiaqi_119020436"
+author: "WuJiaqi 119020436"
+date: "11/27/2021"
+output: html_document
+---
+# Q1
+##(a)
+
+ - $r_p = N(\frac{1}{2}\mu_A+\frac{1}{2}\mu_B,\frac{1}{4}\sigma_A^2+\frac{1}{4}\sigma_B^2+\frac{1}{2}\sigma_A\sigma_B\rho)$
+
+##(b)
+
+ - $VaR_\alpha^p = -[(\frac{1}{4}\sigma_A^2+\frac{1}{4}\sigma_B^2+\frac{1}{2}\sigma_A\sigma_B\rho)^\frac{1}{2}\times Z_\alpha + (\frac{1}{2}\mu_A+\frac{1}{2}\mu_B)]\times I$
+
+##(c)
+
+ - $VaR_\alpha^A = -(\sigma_A\times Z_\alpha + \mu_A) \times I$
+ - $VaR_\alpha^B = -(\sigma_B\times Z_\alpha + \mu_B) \times I$
+ - $\frac{1}{2}VaR_\alpha^A+\frac{1}{2}VaR_\alpha^B = -[\frac{1}{2}(\sigma_A+\sigma_B)\times Z_\alpha+\frac{1}{2}(\mu_A+\mu_B)]\times I$
+ - $\frac{1}{4}\sigma_A^2+\frac{1}{4}\sigma_B^2+\frac{1}{2}\sigma_A\sigma_B\rho \leq [\frac{1}{2}(\sigma_A+\sigma_B)]^2 = \frac{1}{4}\sigma_A^2+\frac{1}{4}\sigma_B^2+\frac{1}{2}\sigma_A\sigma_B)$
+ - $Z_\alpha<0$
+ - $VaR_\alpha^p \leq \frac{1}{2}VaR_\alpha^A+\frac{1}{2}VaR_\alpha^B$
+ 
+# Q2
+```{r}
+library(RPostgres)
+library(dplyr)
+library(zoo)
+wrds = dbConnect(Postgres(),
+                 host='wrds-pgdata.wharton.upenn.edu',
+                 port=9737,
+                 user='jiaqiwu555',
+                 password='Wjq15068193025',
+                 dbname='wrds',
+                 sslmode='require')
+q = paste0("select conm,gvkeyx,tic from COMP.G_IDX_INDEX ")
+res = dbSendQuery(wrds, q)
+mystock = dbFetch(res, n=-1)
+dbClearResult(res)
+id = mystock %>% filter(conm == "CHINA CSI 300 INDEX" | conm == "FTSE 350 Index")
+id
+
+q = paste0("select gvkeyx,Datadate,prccd from G_IDX_DAILY where gvkeyx in ('150036','153435')")
+res = dbSendQuery(wrds, q)
+stock = dbFetch(res, n=-1)
+dbClearResult(res)
+colnames(stock)=c("permno","date","prc")
+stock = stock %>%
+        filter(date>="2014-01-01" & date<"2019-01-01")
+head(stock)
+unique(stock$permno)
+save(stock,file = "/Users/wujiaqi/Desktop/FIN3380/hw4.RData")
+```
+
+```{r}
+# (a)
+I = 1e6
+stock.a = stock %>%
+        group_by(permno) %>%
+        arrange(date) %>%
+        mutate(ret=(prc-lag(prc,1))/lag(prc,1)) %>%
+        mutate(mu=mean(ret,na.rm=T),std=sd(ret,na.rm=T)) %>%
+        ungroup
+csi = stock.a %>% filter(permno=="153435")
+head(csi)
+ftse = stock.a %>% filter(permno=="150036")
+head(ftse)
+caf = stock.a %>%
+        group_by(permno) %>%
+        summarise(mu=last(mu),std=last(std))
+caf
+z5 = qnorm(0.05)
+z5
+var.g.c = -(caf$std[2]*z5+caf$mu[2])*I
+var.g.c
+var.g.f = -(caf$std[1]*z5+caf$mu[1])*I
+var.g.f
+var.h.c = -I * quantile(csi$ret, probs = 0.05, type = 3, na.rm = T)
+var.h.c
+var.h.f = -I * quantile(ftse$ret, probs = 0.05, type = 3, na.rm = T)
+var.h.f
+```
+
+```{r}
+es.g.c = (-caf$mu[2]+caf$std[2]*dnorm(qnorm(0.05))/0.05)*I
+es.g.c
+es.g.f = (-caf$mu[1]+caf$std[1]*dnorm(qnorm(0.05))/0.05)*I
+es.g.f
+```
+
+```{r}
+csi$pl = csi$ret * I
+csi$dummy.q5=NA
+csi[which(csi$pl<=(-var.h.c)),]$dummy.q5=1 
+csi$es = -csi$dummy.q5 * csi$pl
+es.h.c = mean(csi$es, na.rm=T)
+es.h.c
+
+ftse$pl = ftse$ret * I
+ftse$dummy.q5=NA
+ftse[which(ftse$pl<=(-var.h.f)),]$dummy.q5=1 
+ftse$es = -ftse$dummy.q5 * ftse$pl
+es.h.f = mean(ftse$es, na.rm=T)
+es.h.f
+```
+```{r}
+var.g = c(var.g.c,var.g.f)
+var.h = c(var.h.c,var.h.f)
+es.g = c(es.g.c,es.g.f)
+es.h = c(es.h.c,es.h.f)
+risk.tb = cbind(var.g,var.h,es.g,es.h)
+rownames(risk.tb)=c("csi","ftse")
+risk.tb
+```
+
+```{r}
+# (b)
+stock.b = stock.a %>%
+        group_by(date) %>%
+        summarise(ret.p=mean(ret),
+                  prc.p=mean(prc)) %>%
+        ungroup()
+stock.b = stock.b %>%
+        mutate(mu=mean(ret.p,na.rm = T),
+               std=sd(ret.p,na.rm = T))
+head(stock.b)
+port.b = stock.b %>%
+        summarise(mu=last(mu),std=last(std))
+port.b
+var.g.p = -(port.b$std*z5+port.b$mu)*I
+var.g.p
+var.h.p = -I * quantile(stock.b$ret.p, probs = 0.05, type = 3, na.rm = T)
+var.h.p
+es.g.p = (-port.b$mu+port.b$std*dnorm(qnorm(0.05))/0.05)*I
+es.g.p
+
+stock.b$pl = stock.b$ret.p * I
+stock.b$dummy.q5=NA
+stock.b[which(stock.b$pl<=(-var.h.p)),]$dummy.q5=1 
+stock.b$es = -stock.b$dummy.q5 * stock.b$pl
+es.h.p = mean(stock.b$es, na.rm=T)
+es.h.p
+
+summary.b = c(var.g.p,var.h.p,es.g.p,es.h.p)
+risk.tb = rbind(risk.tb,summary.b)
+risk.tb
+# From this table we know that the portfolio helps decrease the downside risk.
+```
+
+```{r}
+# (c)
+library(tidyr)
+library(ggplot2)
+csi$dd = (csi$prc-cummax(csi$prc))/cummax(csi$prc)
+head(csi)
+ftse$dd = (ftse$prc-cummax(ftse$prc))/cummax(ftse$prc)
+head(ftse)
+plot(csi$dd~csi$date, type="l", ylab="dd", main="Drawdowns")
+lines(ftse$dd~ftse$date,col="red")
+legend("bottomleft",
+       c("CSI","FTSE"),
+       lty=c(1,1),
+       col=c("black","red"))
+```
+
+```{r}
+dd.c.max = max(-csi$dd)
+dd.c.max
+dd.f.max = max(-ftse$dd)
+dd.f.max
+
+csi$dd = round(csi$dd,4)
+csi = csi %>% mutate(dd.flag=ifelse(dd<0,1,0))
+head(csi)
+rles.c = rle(csi$dd.flag)
+summary(rles.c$lengths[rles.c$values==1])/260
+cat("The longest drawdown period for CSI is",max((rles.c$lengths[rles.c$values==1])/260),"years")
+
+ftse$dd = round(ftse$dd,4)
+ftse = ftse %>% mutate(dd.flag=ifelse(dd<0,1,0))
+head(ftse)
+rles.f = rle(ftse$dd.flag)
+summary(rles.f$lengths[rles.f$values==1])/260
+cat("The longest drawdown period for CSI is",max((rles.f$lengths[rles.f$values==1])/260),"years")
+```
+
+```{r}
+# (d)
+stock.b$dd = (stock.b$prc.p-cummax(stock.b$prc.p))/cummax(stock.b$prc.p)
+head(stock.b)
+dd.p.max = max(-stock.b$dd)
+dd.p.max
+stock.b$dd = round(stock.b$dd,4)
+stock.b = stock.b %>% mutate(dd.flag=ifelse(dd<0,1,0))
+head(stock.b)
+rles.p = rle(stock.b$dd.flag)
+summary(rles.p$lengths[rles.p$values==1])/260
+cat("The longest drawdown period for portfolio is",max((rles.p$lengths[rles.p$values==1])/260),"years")
+# The maximum drawdown is smaller than CSI but larger than FTSE, the longest drawdown period is the same as CSI.
+```
+
+# Q3
+
+```{r}
+csi3 = csi %>% select(date,ret)
+colnames(csi3)=c("date","csi")
+ftse3 = ftse %>% select(date,ret)
+colnames(ftse3)=c("date","ftse")
+stock3 = merge(csi3,ftse3,by="date")
+head(stock3)
+stock3 = stock3 %>%
+  mutate(csi=ifelse(is.na(csi),0,csi),
+         ftse=ifelse(is.na(ftse),0,ftse)) %>%
+  mutate_at(vars(csi,ftse),
+            list(cumret=function(x) cumprod(x+1)))
+head(stock3)
+```
+```{r}
+stock3 = stock3 %>%
+  mutate_at(vars(csi_cumret,ftse_cumret),
+            list(dd = function(x) (x-cummax(x))/cummax(x)))
+head(stock3)
+
+stock3 = stock3 %>%
+  mutate(anydown = pmin(csi_cumret_dd,ftse_cumret_dd)) %>%
+  mutate(codown = pmax(csi_cumret_dd,ftse_cumret_dd))
+head(stock3)
+
+stock3 = stock3 %>%
+  mutate(flag.csi=ifelse(csi<0,1,0),
+         flag.ftse=ifelse(ftse<0,1,0)) %>%
+  mutate(flag=flag.csi*flag.ftse)
+head(stock3)
+```
+
+```{r}
+stock3$zeroline = 0
+plot(stock3$csi_cumret_dd~stock3$date,
+     type="l", lwd=2,xlab="date", ylab="dd", main="Co-drawdown")
+lines(stock3$ftse_cumret_dd~stock3$date,
+      lwd=2, col="red")
+with(stock3, 
+     polygon(c(date,rev(date)),
+             c(zeroline,rev(anydown)),
+             col=rgb(0,0,0,0.1)))
+with(stock3, 
+     polygon(c(date,rev(date)),
+             c(zeroline,rev(codown)),
+             col=rgb(0,0,0,0.5)))
+legend("bottomleft",
+       c("CSI","FTSE"),
+       lty=c(1,1),
+       col=c("black","red"))
+bothneg = sum(stock3$flag)/length(stock3$date)
+cat("The prob of both negative is",bothneg)
+codd = sum(stock3$codown)/sum(stock3$anydown)
+cat("The prob of co-drawdown is",codd)
+```
+
